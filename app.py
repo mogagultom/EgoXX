@@ -1,44 +1,74 @@
+   
 import streamlit as st
 import openai
 import requests
+from openai import OpenAI
 
 st.title("🧠 ChatGPT + TTS + D-ID Talking Head")
 
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# Ambil API key dari secret
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 D_ID_API_KEY = st.secrets["D_ID_API_KEY"]
 
+# Input dari user
 prompt = st.text_input("Masukkan pertanyaan atau perintah:")
 
 if prompt:
-    # ChatGPT
-    response = openai.ChatCompletion.create(
+    # Kirim ke GPT
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
     )
-    reply = response.choices[0].message.content
-    st.write("💬 ChatGPT:", reply)
+    jawaban = response.choices[0].message.content
+    st.write("💬 Jawaban:", jawaban)
 
-    # TTS (Text to Speech)
-    tts_response = openai.Audio.create(
-        model="tts-1",
-        voice="alloy",
-        input=reply
-    )
-    audio_data = tts_response.read()
+    # Text to Speech (TTS) pakai ElevenLabs (bisa diganti)
+    voice_id = "EXAVITQu4vr4xnSDxMaL"
+    tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
-    # Upload suara ke D-ID
     headers = {
-        "Authorization": f"Bearer {D_ID_API_KEY}"
+        "xi-api-key": st.secrets["ELEVENLABS_API_KEY"],
+        "Content-Type": "application/json"
     }
-    files = {
-        'script': (None, '{"type":"audio","provider":"microsoft","ssml":false}'),
-        'audio': ('audio.mp3', audio_data)
-    }
-    did_res = requests.post("https://api.d-id.com/talks", headers=headers, files=files)
 
-    if did_res.status_code == 200:
-        result = did_res.json()
-        video_url = result.get("result_url")
+    data = {
+        "text": jawaban,
+        "model_id": "eleven_monolingual_v1",
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+    }
+
+    audio_response = requests.post(tts_url, headers=headers, json=data)
+
+    if audio_response.status_code == 200:
+        with open("jawaban.mp3", "wb") as f:
+            f.write(audio_response.content)
+        audio_file = open("jawaban.mp3", "rb")
+        audio_bytes = audio_file.read()
+        st.audio(audio_bytes, format="audio/mp3")
+    else:
+        st.error("Gagal mengubah teks jadi suara 😢")
+
+    # Kirim ke D-ID (Talking Head Video)
+    image_url = "https://i.imgur.com/2RXPc2d.png"  # Gambar default, bisa diganti
+    headers = {
+        "Authorization": f"Bearer {D_ID_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    did_data = {
+        "script": {
+            "type": "text",
+            "provider": {"type": "elevenlabs", "voice_id": voice_id},
+            "ssml": False,
+            "input": jawaban
+        },
+        "source_url": image_url
+    }
+
+    res = requests.post("https://api.d-id.com/talks", headers=headers, json=did_data)
+
+    if res.status_code == 200:
+        video_url = res.json()["result_url"]
         st.video(video_url)
     else:
-        st.error("Gagal membuat video dari D-ID")
+        st.error("Gagal membuat video talking head 😢")
